@@ -9,13 +9,8 @@ use ab_glyph::{point, Font, Glyph, Point, PxScale, ScaleFont};
 
 /// Simple paragraph layout for glyphs into `target`.
 /// Taken from https://github.com/alexheretic/ab-glyph/blob/master/dev/src/layout.rs
-pub fn layout_paragraph<F, SF>(
-    font: SF,
-    position: Point,
-    max_width: f32,
-    text: &str,
-    target: &mut Vec<Glyph>,
-) where
+pub fn layout_paragraph<F, SF>(font: SF, position: Point, text: &str, target: &mut Vec<Glyph>)
+where
     F: Font,
     SF: ScaleFont<F>,
 {
@@ -39,12 +34,6 @@ pub fn layout_paragraph<F, SF>(
         last_glyph = Some(glyph.clone());
         caret.x += font.h_advance(glyph.id);
 
-        if !c.is_whitespace() && caret.x > position.x + max_width {
-            caret = point(position.x, caret.y + v_advance);
-            glyph.position = caret;
-            last_glyph = None;
-        }
-
         target.push(glyph);
     }
 }
@@ -56,7 +45,7 @@ pub fn draw_text_mut<'a, C, F>(
     x: u32,
     y: u32,
     scale: PxScale,
-    max_width: f32,
+    max_width: u32,
     font: F,
     text: &'a str,
 ) where
@@ -67,7 +56,20 @@ pub fn draw_text_mut<'a, C, F>(
     let scaled_font = font.as_scaled(scale);
     let mut glyphs = Vec::new();
     let position = point(x as f32, y as f32);
-    layout_paragraph(scaled_font, position, max_width, text, &mut glyphs);
+    layout_paragraph(scaled_font, position, text, &mut glyphs);
+
+    let last_glyph = &glyphs[glyphs.len() - 1];
+    let actual_width = last_glyph.position.x + last_glyph.scale.x;
+    if actual_width > max_width as f32 {
+        let shrink_factor = actual_width / (max_width as f32);
+        let new_scale = PxScale {
+            x: scale.x / shrink_factor,
+            y: scale.y,
+        };
+        glyphs.clear();
+        let rescaled_font = font.as_scaled(new_scale);
+        layout_paragraph(rescaled_font, position, text, &mut glyphs);
+    }
 
     // Loop through the glyphs in the text, positing each one on a line
     for glyph in glyphs {
@@ -94,7 +96,7 @@ pub fn draw_text<'a, I, F>(
     x: u32,
     y: u32,
     scale: PxScale,
-    max_width: f32,
+    max_width: u32,
     font: F,
     text: &'a str,
 ) -> Image<I::Pixel>

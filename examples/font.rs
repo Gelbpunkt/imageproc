@@ -30,7 +30,7 @@ fn main() {
         0,
         0,
         scale,
-        200.0,
+        200,
         &font,
         "Hello, world!",
     );
