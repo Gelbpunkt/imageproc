@@ -1,8 +1,8 @@
 //! An example of drawing text. Writes to the user-provided target file.
 
+use ab_glyph::{FontRef, PxScale};
 use image::{Rgb, RgbImage};
 use imageproc::drawing::draw_text_mut;
-use rusttype::{Font, Scale};
 use std::env;
 use std::path::Path;
 
@@ -17,11 +17,10 @@ fn main() {
 
     let mut image = RgbImage::new(200, 200);
 
-    let font = Vec::from(include_bytes!("DejaVuSans.ttf") as &[u8]);
-    let font = Font::try_from_vec(font).unwrap();
+    let font = FontRef::try_from_slice(include_bytes!("DejaVuSans.ttf") as &[u8]).unwrap();
 
     let height = 12.4;
-    let scale = Scale {
+    let scale = PxScale {
         x: height * 2.0,
         y: height,
     };
@@ -31,6 +30,7 @@ fn main() {
         0,
         0,
         scale,
+        200.0,
         &font,
         "Hello, world!",
     );

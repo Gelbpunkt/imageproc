@@ -3,68 +3,109 @@ use crate::drawing::Canvas;
 use conv::ValueInto;
 use image::{GenericImage, ImageBuffer, Pixel};
 use std::f32;
-use std::i32;
 
 use crate::pixelops::weighted_sum;
-use rusttype::{point, Font, PositionedGlyph, Scale};
+use ab_glyph::{point, Font, Glyph, Point, PxScale, ScaleFont};
+
+/// Simple paragraph layout for glyphs into `target`.
+/// Taken from https://github.com/alexheretic/ab-glyph/blob/master/dev/src/layout.rs
+pub fn layout_paragraph<F, SF>(
+    font: SF,
+    position: Point,
+    max_width: f32,
+    text: &str,
+    target: &mut Vec<Glyph>,
+) where
+    F: Font,
+    SF: ScaleFont<F>,
+{
+    let v_advance = font.height() + font.line_gap();
+    let mut caret = position + point(0.0, font.ascent());
+    let mut last_glyph: Option<Glyph> = None;
+    for c in text.chars() {
+        if c.is_control() {
+            if c == '\n' {
+                caret = point(position.x, caret.y + v_advance);
+                last_glyph = None;
+            }
+            continue;
+        }
+        let mut glyph = font.scaled_glyph(c);
+        if let Some(previous) = last_glyph.take() {
+            caret.x += font.kern(previous.id, glyph.id);
+        }
+        glyph.position = caret;
+
+        last_glyph = Some(glyph.clone());
+        caret.x += font.h_advance(glyph.id);
+
+        if !c.is_whitespace() && caret.x > position.x + max_width {
+            caret = point(position.x, caret.y + v_advance);
+            glyph.position = caret;
+            last_glyph = None;
+        }
+
+        target.push(glyph);
+    }
+}
 
 /// Draws colored text on an image in place. `scale` is augmented font scaling on both the x and y axis (in pixels). Note that this function *does not* support newlines, you must do this manually
-pub fn draw_text_mut<'a, C>(
+pub fn draw_text_mut<'a, C, F>(
     canvas: &'a mut C,
     color: C::Pixel,
     x: u32,
     y: u32,
-    scale: Scale,
-    font: &'a Font<'a>,
+    scale: PxScale,
+    max_width: f32,
+    font: F,
     text: &'a str,
 ) where
     C: Canvas,
     <C::Pixel as Pixel>::Subpixel: ValueInto<f32> + Clamp<f32>,
+    F: Font,
 {
-    let v_metrics = font.v_metrics(scale);
-    let offset = point(0.0, v_metrics.ascent);
+    let scaled_font = font.as_scaled(scale);
+    let mut glyphs = Vec::new();
+    let position = point(x as f32, y as f32);
+    layout_paragraph(scaled_font, position, max_width, text, &mut glyphs);
 
-    let glyphs: Vec<PositionedGlyph<'_>> = font.layout(text, scale, offset).collect();
-
-    for g in glyphs {
-        if let Some(bb) = g.pixel_bounding_box() {
-            g.draw(|gx, gy, gv| {
-                let gx = gx as i32 + bb.min.x;
-                let gy = gy as i32 + bb.min.y;
-
-                let image_x = gx + x as i32;
-                let image_y = gy + y as i32;
-
-                let image_width = canvas.width() as i32;
-                let image_height = canvas.height() as i32;
-
-                if image_x >= 0 && image_x < image_width && image_y >= 0 && image_y < image_height {
-                    let pixel = canvas.get_pixel(image_x as u32, image_y as u32);
-                    let weighted_color = weighted_sum(pixel, color, 1.0 - gv, gv);
-                    canvas.draw_pixel(image_x as u32, image_y as u32, weighted_color);
-                }
-            })
+    // Loop through the glyphs in the text, positing each one on a line
+    for glyph in glyphs {
+        if let Some(outlined) = scaled_font.outline_glyph(glyph) {
+            let bounds = outlined.px_bounds();
+            // Draw the glyph into the image per-pixel by using the draw closure
+            outlined.draw(|x, y, v| {
+                // Offset the position by the glyph bounding box
+                let pixel_x = x + bounds.min.x as u32;
+                let pixel_y = y + bounds.min.y as u32;
+                let px = canvas.get_pixel(pixel_x, pixel_y);
+                let weighted_color = weighted_sum(px, color, 1.0 - v, v);
+                // Turn the coverage into an alpha value (blended with any previous)
+                canvas.draw_pixel(pixel_x, pixel_y, weighted_color);
+            });
         }
     }
 }
 
 /// Draws colored text on an image in place. `scale` is augmented font scaling on both the x and y axis (in pixels). Note that this function *does not* support newlines, you must do this manually
-pub fn draw_text<'a, I>(
+pub fn draw_text<'a, I, F>(
     image: &'a mut I,
     color: I::Pixel,
     x: u32,
     y: u32,
-    scale: Scale,
-    font: &'a Font<'a>,
+    scale: PxScale,
+    max_width: f32,
+    font: F,
     text: &'a str,
 ) -> Image<I::Pixel>
 where
     I: GenericImage,
     <I::Pixel as Pixel>::Subpixel: ValueInto<f32> + Clamp<f32>,
     I::Pixel: 'static,
+    F: Font,
 {
     let mut out = ImageBuffer::new(image.width(), image.height());
     out.copy_from(image, 0, 0).unwrap();
-    draw_text_mut(&mut out, color, x, y, scale, font, text);
+    draw_text_mut(&mut out, color, x, y, scale, max_width, font, text);
     out
 }
