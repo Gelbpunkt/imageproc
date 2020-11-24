@@ -59,7 +59,7 @@ pub fn draw_text_mut<'a, C, F>(
     layout_paragraph(scaled_font, position, text, &mut glyphs);
 
     let last_glyph = &glyphs[glyphs.len() - 1];
-    let actual_width = last_glyph.position.x + last_glyph.scale.x;
+    let actual_width = last_glyph.position.x - (x as f32) + last_glyph.scale.x;
     if actual_width > max_width as f32 {
         let shrink_factor = actual_width / (max_width as f32);
         let new_scale = PxScale {
